@@ -1,0 +1,488 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+
+    "mustorage0411Type": {
+      "type": "string",
+      "defaultValue": "Standard_LRS",
+      "allowedValues": [
+        "Standard_LRS",
+        "Standard_ZRS",
+        "Standard_GRS",
+        "Standard_RAGRS",
+        "Premium_LRS"
+      ]
+    },
+    "myVAAdminPassword": {
+      "type": "securestring"
+    },
+
+    "FENSGName": {
+      "type": "string"
+    },
+    "AppNSGName": {
+      "type": "string"
+    },
+    "myVAAdminUserName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "myVAName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "POOLNAME": {
+      "type": "string",
+      "metadata": {
+        "description": "Type Storage Pool Name"
+      }
+    },
+    "VOLNAME": {
+      "type": "string",
+      "metadata": {
+        "description": "Type Strage volume name"
+      }
+    },
+    "publicIPsnDnsName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "jumpName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "jumpAdminUserName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "jumpAdminPassword": {
+      "type": "securestring"
+    },
+    "jumpWindowsOSVersion": {
+      "type": "string",
+      "defaultValue": "2012-R2-Datacenter",
+      "allowedValues": [
+        "2008-R2-SP1",
+        "2012-Datacenter",
+        "2012-R2-Datacenter",
+        "Windows-Server-Technical-Preview"
+      ]
+    },
+    "_artifactsLocation": {
+      "type": "string",
+      "metadata": {
+        "description": "Auto-generated container in staging storage account to receive post-build staging folder upload"
+      }
+    },
+    "_artifactsLocationSasToken": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Auto-generated token to access _artifactsLocation"
+      }
+    }
+  },
+  "variables": {
+    "imageSKU": "standard_byol",
+    "mustorage0411Name": "[concat('mystorag', uniqueString(resourceGroup().id))]",
+    "VAVNETPrefix": "10.0.0.0/16",
+    "VAVNETSubnet1Name": "Subnet-1",
+    "VAVNETSubnet1Prefix": "10.0.0.0/24",
+    "VAVNETSubnet2Name": "Subnet-2",
+    "VAVNETSubnet2Prefix": "10.0.1.0/24",
+    "myVAImagePublisher": "softnas",
+    "myVAImageOffer": "softnas-cloud",
+    "myVAOSDiskName": "myVAOSDisk",
+    "myVADATADiskName": "myVADATADisk1",
+    "myVAVmSize": "Standard_A0",
+    "myVAVnetID": "[resourceId('Microsoft.Network/virtualNetworks', 'VAVNET')]",
+    "myVASubnetRef": "[concat(variables('myVAVnetID'), '/subnets/', variables('VAVNETSubnet1Name'))]",
+    "myVAStorageAccountContainerName": "vhds",
+    "myVANicName": "[concat(parameters('myVAName'), 'NetworkInterface')]",
+    "extensionScriptFolder": "CustomScripts",
+    "extensionScriptFileName": "extension.sh",
+    "testScriptFolder": "CustomScripts",
+    "testScriptFileName": "test.sh",
+    "publicIPsnName": "publicIPsn",
+    "jumpImagePublisher": "MicrosoftWindowsServer",
+    "jumpImageOffer": "WindowsServer",
+    "jumpOSDiskName": "jumpOSDisk",
+    "jumpVmSize": "Standard_D2_v2",
+    "jumpVnetID": "[resourceId('Microsoft.Network/virtualNetworks', 'VAVNET')]",
+    "jumpSubnetRef": "[concat(variables('jumpVnetID'), '/subnets/', variables('VAVNETSubnet2Name'))]",
+    "jumpStorageAccountContainerName": "vhds",
+    "jumpNicName": "[concat(parameters('jumpName'), 'NetworkInterface')]",
+    "jumpvmextensionScriptFileName": "jumpvmextension.ps1"
+  },
+  "resources": [
+
+    {
+      "apiVersion": "2015-05-01-preview",
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "name": "[parameters('FENSGName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "rdp_rule",
+            "properties": {
+              "description": "Allow RDP",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "3389",
+              "sourceAddressPrefix": "Internet",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 4089,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "web_rule",
+            "properties": {
+              "description": "Allow WEB",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "80",
+              "sourceAddressPrefix": "Internet",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 4088,
+              "direction": "Inbound"
+            }
+          }
+        ]
+      }
+    },
+
+    {
+      "apiVersion": "2015-05-01-preview",
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "name": "[parameters('AppNSGName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "Allow_FE",
+            "properties": {
+              "description": "Allow FE Subnet",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "[variables('VAVNETSubnet2Prefix')]",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 4080,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "Block_RDP_Internet",
+            "properties": {
+              "description": "Block RDP",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Deny",
+              "priority": 4087,
+              "direction": "Inbound"
+            }
+          }
+        ]
+      }
+    },
+      
+          {
+            "name": "[variables('mustorage0411Name')]",
+            "type": "Microsoft.Storage/storageAccounts",
+            "location": "[resourceGroup().location]",
+            "apiVersion": "2016-01-01",
+            "sku": {
+              "name": "[parameters('mustorage0411Type')]"
+            },
+            "dependsOn": [],
+            "tags": {
+              "displayName": "mustorage0411"
+            },
+            "kind": "Storage"
+          },
+    {
+      "name": "VAVNET",
+      "type": "Microsoft.Network/virtualNetworks",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2017-06-01",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkSecurityGroups', parameters('FENSGName'))]",
+        "[resourceId('Microsoft.Network/networkSecurityGroups', parameters('AppNSGName'))]",
+      ],
+        "tags":        {
+          "displayName": "VAVNET"
+        },
+        "properties":
+        {
+          "addressSpace": {
+            "addressPrefixes": [
+              "[variables('VAVNETPrefix')]"
+            ]
+          },
+          "subnets": [
+            {
+              "name": "[variables('VAVNETSubnet1Name')]",
+              "properties": {
+                "addressPrefix": "[variables('VAVNETSubnet1Prefix')]",
+                "networkSecurityGroup": {
+                  "id": "[resourceId('Microsoft.Network/networkSecurityGroups', parameters('AppNSGName'))]"
+                }
+              }
+            },
+            {
+              "name": "[variables('VAVNETSubnet2Name')]",
+              "properties": {
+                "addressPrefix": "[variables('VAVNETSubnet2Prefix')]",
+                "networkSecurityGroup": {
+                  "id": "[resourceId('Microsoft.Network/networkSecurityGroups', parameters('FENSGName'))]"
+                }
+              }
+            }
+          ]
+        }
+    },
+
+          {
+            "name": "[variables('myVANicName')]",
+            "type": "Microsoft.Network/networkInterfaces",
+            "location": "[resourceGroup().location]",
+            "apiVersion": "2017-06-01",
+            "dependsOn": [
+              "[resourceId('Microsoft.Network/virtualNetworks', 'VAVNET')]",
+              
+            ],
+            "tags": {
+              "displayName": "myVANic"
+            },
+            "properties": {
+              "ipConfigurations": [
+                {
+                  "name": "ipconfig1",
+                  "properties": {
+                    "privateIPAllocationMethod": "Dynamic",
+                    "subnet": {
+                      "id": "[variables('myVASubnetRef')]"
+                    }
+                    
+                  }
+                }
+              ]
+            }
+          },
+
+          {
+            "name": "[parameters('myVAName')]",
+            "type": "Microsoft.Compute/virtualMachines",
+            "location": "[resourceGroup().location]",
+            "apiVersion": "2015-06-15",
+            "dependsOn": [
+              "[resourceId('Microsoft.Storage/storageAccounts', variables('mustorage0411Name'))]",
+              "[resourceId('Microsoft.Network/networkInterfaces', variables('myVANicName'))]"
+            ],
+            "tags": {
+              "displayName": "myVA"
+            },
+            "plan": {
+              "name": "[variables('imageSKU')]",
+              "publisher": "[variables('myVAImagePublisher')]",
+              "product": "[variables('myVAImageOffer')]"
+            },
+            "properties": {
+              "hardwareProfile": {
+                "vmSize": "[variables('myVAVmSize')]"
+              },
+              "osProfile": {
+                "computerName": "[parameters('myVAName')]",
+                "adminUsername": "[parameters('myVAAdminUsername')]",
+                "adminPassword": "[parameters('myVAAdminPassword')]"
+              },
+              "storageProfile": {
+                "imageReference": {
+                  "publisher": "[variables('myVAImagePublisher')]",
+                  "offer": "[variables('myVAImageOffer')]",
+                  "sku": "[variables('imageSKU')]",
+                  "version": "latest"
+                },
+                "osDisk": {
+                  "name": "myVAOSDisk",
+                  "vhd": {
+                    "uri": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', variables('mustorage0411Name')), '2016-01-01').primaryEndpoints.blob, variables('myVAStorageAccountContainerName'), '/', variables('myVAOSDiskName'), '.vhd')]"
+                  },
+                  "caching": "ReadWrite",
+                  "createOption": "FromImage"
+                },
+                "dataDisks": [
+                  {
+                    "name": "datadisk1",
+                    "diskSizeGB": "99",
+                    "lun": 0,
+                    "vhd": {
+                      "uri": "[concat('http://',variables('mustorage0411Name'),'.blob.core.windows.net/',variables('myVAStorageAccountContainerName'),'/',variables('myVADATADiskName'),'.vhd')]"
+                    },
+                    "createOption": "Empty"
+                  }
+                ]
+              },
+              "networkProfile": {
+                "networkInterfaces": [
+                  {
+                    "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('myVANicName'))]"
+                  }
+                ]
+              }
+
+            },
+            "resources": [
+              {
+                "name": "test",
+                "type": "extensions",
+                "location": "[resourceGroup().location]",
+                "apiVersion": "2016-03-30",
+                "dependsOn": [
+                  "[resourceId('Microsoft.Compute/virtualMachines', parameters('myVAName'))]"
+                ],
+                "tags": {
+                  "displayName": "test"
+                },
+                "properties": {
+                  "publisher": "Microsoft.OSTCExtensions",
+                  "type": "CustomScriptForLinux",
+                  "typeHandlerVersion": "1.4",
+                  "autoUpgradeMinorVersion": true,
+                  "settings": {
+                    "fileUris": [
+                      "https://mystoragfkevqyrxbew22.blob.core.windows.net/public/test.sh"
+                    ],
+                    "commandToExecute": "[concat('sh test.sh',' ', parameters('myVAAdminUserName'),' ', parameters('myVAAdminPassword'),' ', parameters('POOLNAME'),' ', parameters('VOLNAME'))]"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "name": "[variables('publicIPsnName')]",
+            "type": "Microsoft.Network/publicIPAddresses",
+            "location": "[resourceGroup().location]",
+            "apiVersion": "2016-03-30",
+            "dependsOn": [],
+            "tags": {
+              "displayName": "publicIPsn"
+            },
+            "properties": {
+              "publicIPAllocationMethod": "Dynamic",
+              "dnsSettings": {
+                "domainNameLabel": "[parameters('publicIPsnDnsName')]"
+              }
+            }
+          },
+    {
+      "name": "[variables('jumpNicName')]",
+      "type": "Microsoft.Network/networkInterfaces",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2016-03-30",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', 'VAVNET')]",
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIPsnName'))]"
+      ],
+      "tags": {
+        "displayName": "jumpNic"
+      },
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[variables('jumpSubnetRef')]"
+              },
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIPsnName'))]"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "[parameters('jumpName')]",
+      "type": "Microsoft.Compute/virtualMachines",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2015-06-15",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('mustorage0411Name'))]",
+        "[resourceId('Microsoft.Network/networkInterfaces', variables('jumpNicName'))]"
+      ],
+      "tags": {
+        "displayName": "jump"
+      },
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "[variables('jumpVmSize')]"
+        },
+        "osProfile": {
+          "computerName": "[parameters('jumpName')]",
+          "adminUsername": "[parameters('jumpAdminUsername')]",
+          "adminPassword": "[parameters('jumpAdminPassword')]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "[variables('jumpImagePublisher')]",
+            "offer": "[variables('jumpImageOffer')]",
+            "sku": "[parameters('jumpWindowsOSVersion')]",
+            "version": "latest"
+          },
+          "osDisk": {
+            "name": "jumpOSDisk",
+            "vhd": {
+              "uri": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', variables('mustorage0411Name')), '2016-01-01').primaryEndpoints.blob, variables('jumpStorageAccountContainerName'), '/', variables('jumpOSDiskName'), '.vhd')]"
+            },
+            "caching": "ReadWrite",
+            "createOption": "FromImage"
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('jumpNicName'))]"
+            }
+          ]
+        }
+      },
+      "resources": [
+        {
+          "name": "jumpvmextension",
+          "type": "extensions",
+          "location": "[resourceGroup().location]",
+          "apiVersion": "2016-03-30",
+          "dependsOn": [
+            "[resourceId('Microsoft.Compute/virtualMachines', parameters('jumpName'))]"
+          ],
+          "tags": {
+            "displayName": "jumpvmextension"
+          },
+          "properties": {
+            "publisher": "Microsoft.Compute",
+            "type": "CustomScriptExtension",
+            "typeHandlerVersion": "1.4",
+            "autoUpgradeMinorVersion": true,
+            "settings": {
+              "fileUris": [
+                "https://mystoragfkevqyrxbew22.blob.core.windows.net/public/jumpvmextension.ps1"
+              ],
+              "commandToExecute": "[concat('powershell -ExecutionPolicy Unrestricted -File ', variables('jumpvmextensionScriptFileName'),' ', parameters('myVAName'),' ', parameters('VOLNAME'))]"
+            }
+          }
+        }
+      ]
+    }
+        ]
+      }

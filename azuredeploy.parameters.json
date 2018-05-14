@@ -1,0 +1,39 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "myVAName": {
+      "value": "11softnas"
+    },
+    "myVAAdminUserName": {
+      "value": "softnas"
+    },
+    "POOLNAME": {
+      "value": "mypool"
+    },
+    "VOLNAME": {
+      "value": "myvol1455"
+    },
+    "myVAAdminPassword": {
+      "value": "Pass@1234567"
+    },
+    "publicIPsnDnsName": {
+      "value": "myjumpvm145418"
+    },
+    "jumpName": {
+      "value": "VAJump"
+    },
+    "jumpAdminUserName": {
+      "value": "bhanush"
+    },
+    "jumpAdminPassword": {
+      "value": "Pass@1234567"
+    },
+    "FENSGName": {
+      "value": "JumpNSG"
+    },
+    "AppNSGName": {
+      "value": "VANSG"
+    }
+    }
+  }
